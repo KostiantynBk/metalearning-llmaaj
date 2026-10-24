@@ -266,6 +266,11 @@ def render_explanation(report: dict) -> str:
               "## 2. Rules learned from this training set", "",
               "Rules are hypotheses inferred from labels, not expert-authored instructions. List order conveys induction priority; "
               "at decision time every active rule has the same non-compensating veto.", "",
+              *([f"Exception: {', '.join(_text(r.rule_id) for r in rulebook.rules if r.origin == 'fixed_general_check')} "
+                 "is a fixed general-quality check (correct, consistent with the context, answers the request) added "
+                 "to every rulebook by design, not learned from labels. Its training triggers and precision below are "
+                 "measured exactly like the learned rules, and the same disabling rule applies to it.", ""]
+                if any(r.origin == "fixed_general_check" for r in rulebook.rules) else []),
               "| ID | Requirement | Applies when | Scope | Status | Triggered on training (bad/good) | Precision |",
               "|---|---|---|---|---|---:|---:|"]
     stats = report.get("rule_stats", {})

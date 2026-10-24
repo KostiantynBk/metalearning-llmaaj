@@ -117,10 +117,10 @@ class Settings:
     input_dir: str = "/input"
     artifacts_dir: str = "/artifacts"
     output_dir: str = "/output"
-    model_assessor: str = "gemma-4-31b-it"
-    model_proposer: str = "gemma-4-31b-it"
-    model_baseline: str = "gemma-4-31b-it"
-    max_concurrency: int = 4
+    model_assessor: str = "gemma-4-26b-a4b-it"   # 31B measured 34-315 s/call on the free tier (24 Oct)
+    model_proposer: str = "gemma-4-26b-a4b-it"
+    model_baseline: str = "gemma-4-26b-a4b-it"
+    max_concurrency: int = 8                     # throughput stays bounded by rpm_limit/tpm_limit
     rpm_limit: int = 25                 # client-side requests/minute cap (API limit 30)
     tpm_limit: int = 15000              # client-side input tokens/minute cap (API limit ~16K)
     time_budget_s: float = 3000.0       # per stage (adapt or eval)

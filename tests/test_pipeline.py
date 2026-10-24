@@ -127,7 +127,9 @@ class PipelineTests(unittest.TestCase):
         runtime_rules = json.loads((path / "runtime" / "rulebook.json").read_text())
         self.assertNotIn("provenance_ids", runtime_rules["rules"][0])
         jury_rules = json.loads((path / "jury" / "rulebook_with_provenance.json").read_text())
-        self.assertEqual(jury_rules["rules"][0]["provenance_ids"], [self.train[0].item_id])
+        self.assertEqual(jury_rules["rules"][0]["rule_id"], "R00")
+        self.assertEqual(jury_rules["rules"][0]["provenance_ids"], [])
+        self.assertEqual(jury_rules["rules"][1]["provenance_ids"], [self.train[0].item_id])
         report = self.mocks["explain.render_explanation"].call_args.args[0]
         expected = {"run_info", "rulebook", "head", "selection", "rule_stats", "examples", "metrics",
                     "fallbacks", "induction_notes", "hashes", "items_by_id", "assessments"}
@@ -189,10 +191,18 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 5)
         self.assertIn("No rules were learned", text)
 
-    def test_no_rules_degrades(self):
+    def test_no_learned_rules_still_uses_general_check(self):
         self.mocks["induction.induce_rulebook"].return_value = (Rulebook([]), {})
-        self.assertEqual(self._adapt()["mode"], "prior_only")
-        self.mocks["assessor.assess_many"].assert_not_called()
+        self.assertNotEqual(self._adapt()["mode"], "prior_only")
+        rulebook = self.mocks["assessor.assess_many"].call_args[0][1]
+        self.assertEqual([rule.rule_id for rule in rulebook.rules], ["R00"])
+
+    def test_general_rule_prepended_to_learned_rules(self):
+        self._adapt()
+        rulebook = self.mocks["assessor.assess_many"].call_args[0][1]
+        self.assertEqual(rulebook.rules[0].rule_id, "R00")
+        self.assertEqual(rulebook.rules[0].origin, "fixed_general_check")
+        self.assertIn("R01", [rule.rule_id for rule in rulebook.rules])
 
     def test_exception_after_eval_checkpoint_preserves_completed_labels(self):
         self._adapt()

@@ -392,3 +392,26 @@ class InductionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeneralRuleTests(unittest.TestCase):
+    def test_prepends_fixed_rule_and_respects_cap(self):
+        from rulejudge.contracts import MAX_RULES
+        from rulejudge.induction import GENERAL_RULE_ID, add_general_rule
+        learned = [Rule(f"R{i:02d}", f"Rule {i}") for i in range(1, MAX_RULES + 1)]
+        out = add_general_rule(Rulebook(learned, ["note"]))
+        self.assertEqual(out.rules[0].rule_id, GENERAL_RULE_ID)
+        self.assertEqual(out.rules[0].scope, "global")
+        self.assertEqual(out.rules[0].origin, "fixed_general_check")
+        self.assertEqual(len(out.rules), MAX_RULES)
+        self.assertEqual(out.rules[-1].rule_id, f"R{MAX_RULES - 1:02d}")
+        self.assertEqual(out.notes[0], "note")
+        self.assertIn("dropped", out.notes[-1])
+
+    def test_idempotent_and_empty(self):
+        from rulejudge.induction import add_general_rule
+        once = add_general_rule(Rulebook([]))
+        self.assertEqual([r.rule_id for r in once.rules], ["R00"])
+        twice = add_general_rule(once)
+        self.assertEqual([r.rule_id for r in twice.rules], ["R00"])
+        self.assertEqual(twice.notes, [])

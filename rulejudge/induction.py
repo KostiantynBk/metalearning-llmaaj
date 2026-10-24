@@ -28,6 +28,32 @@ _PAIR_CHARS = 9000
 _CONSOLIDATION_CHARS = 20000
 _RUBRIC_CHARS = 3500
 _FIELD_CAPS = {"text": 160, "applies_when": 120, "violation": 140, "boundary": 120}
+
+GENERAL_RULE_ID = "R00"
+GENERAL_RULE_ORIGIN = "fixed_general_check"
+
+
+def general_rule() -> Rule:
+    """Fixed holistic check prepended to every rulebook; not learned from labels."""
+    return Rule(GENERAL_RULE_ID,
+                "The assistant's reply must be correct, consistent with the context data, and actually address "
+                "the customer's request.",
+                "global", "",
+                "A wrong or invented fact, number, date, rate or status; contradicting the context; or ignoring "
+                "or evading the customer's actual request.",
+                "Style, tone or brevity alone is not a violation when the content is correct and responsive.",
+                [], GENERAL_RULE_ORIGIN)
+
+
+def add_general_rule(rulebook: Rulebook) -> Rulebook:
+    """Prepend R00 and keep the total within MAX_RULES by dropping the lowest-priority learned rules."""
+    learned = [rule for rule in rulebook.rules if rule.rule_id != GENERAL_RULE_ID]
+    notes = list(rulebook.notes)
+    if len(learned) > MAX_RULES - 1:
+        notes.append(f"{len(learned) - (MAX_RULES - 1)} lowest-priority learned rule(s) dropped to fit "
+                     f"{GENERAL_RULE_ID} within MAX_RULES.")
+        learned = learned[:MAX_RULES - 1]
+    return Rulebook([general_rule()] + learned, notes)
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 _HEX_ID = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])", re.IGNORECASE)
 _CONFIDENCE = {"high": 2, "medium": 1, "low": 0}

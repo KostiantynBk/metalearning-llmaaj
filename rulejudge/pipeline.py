@@ -119,8 +119,8 @@ def run_adapt(settings: Settings, client: Optional[LLMClient] = None) -> int:
         f_items, s_items = [by_id[iid] for iid in f_ids], [by_id[iid] for iid in s_ids]
         rulebook, induction_log = induction.induce_rulebook(f_items, client, settings)
         if not rulebook.rules:
-            _banner("no rules induced; prior-only bundle retained")
-            return 0
+            _banner(f"no rules induced; continuing with the fixed general check {induction.GENERAL_RULE_ID} only")
+        rulebook = induction.add_general_rule(rulebook)
         assessments = assessor.assess_many(items, rulebook, client, settings)
         fixed = HeadParams("fixed", 2)
         fitted = decision.fit_fitted_head(f_items, assessments, priors, fit_on="F")
