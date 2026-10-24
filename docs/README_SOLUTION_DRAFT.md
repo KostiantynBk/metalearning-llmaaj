@@ -8,16 +8,16 @@ rulejudge is a CLI for the Plata *A Judge That Learns from an Expert* challenge.
 
 1. Read the labeled training JSONL, fit per-topic majority priors, and immediately save a valid prior-only bundle.
 2. Split training into fitting and selection sets; keep evaluation labels out of all prompts and fitting.
-3. Use same-topic bad/good contrast pairs to propose and consolidate at most 12 compact requirements. These are hypotheses inferred from labels, not expert-authored rules.
+3. Use same-topic bad/good contrast pairs to propose and consolidate compact requirements. These are hypotheses inferred from labels, not expert-authored rules. One fixed general check, **R00** ("the reply must be correct, consistent with the context data, and actually address the customer's request"), is prepended to every rulebook by design; the total stays at most 12 rules.
 4. Ask Gemma once per conversation to assess all applicable requirements, with support levels 0–3 and short evidence pointers. Parsing failures may cause retries.
 5. Select a fixed or fitted non-compensating decision head using training only: any active requirement meeting the threshold makes the conversation `bad`. Disabled requirements cannot veto. Failed assessments use topic priors; a valid no-applicable-rule result means `good`.
 6. Save the learned runtime and an automatic, example-backed jury explanation. In a separate `eval` process, load the frozen runtime and atomically checkpoint a complete predictions CSV, starting with prior predictions.
 
 ## Model and terms
 
-Default core model: **Gemma 4 `gemma-4-31b-it` via the Gemini API**, used for proposing rules, assessing conversations, and the zero-shot same-model baseline. No local model weights are bundled. See [Gemma terms](https://ai.google.dev/gemma/terms) and [Gemini API terms](https://ai.google.dev/gemini-api/terms).
+Default core model: **Gemma 4 `gemma-4-26b-a4b-it` via the Gemini API**, used for proposing rules, assessing conversations, and the zero-shot same-model baseline. `gemma-4-31b-it` is supported through the `RJ_MODEL_*` variables, but on the free tier on 24 Oct 2026 it took 34–315 s per call (rule induction is sequential), which risks the per-stage time budget. No local model weights are bundled. See [Gemma terms](https://ai.google.dev/gemma/terms) and [Gemini API terms](https://ai.google.dev/gemini-api/terms).
 
-Model terms and API service terms are separate from the repository's code license. **Root LICENSE: TBD by integrator / Constantin.** Data rights are not granted by this draft; do not republish training data or private examples without permission.
+Model terms and API service terms are separate from the repository's code license. The code in this repository is released under the **MIT License** (see [LICENSE](../LICENSE)). Data rights are not granted by this draft; do not republish training data or private examples without permission.
 
 ## Setup
 
@@ -81,12 +81,12 @@ The runner writes `report.json` and `report.md` with official `src/evaluate.py` 
 | `RJ_INPUT_DIR` | `/input`; local runner sets a run-specific directory |
 | `RJ_ARTIFACTS_DIR` | `/artifacts`; local runner sets a run-specific directory |
 | `RJ_OUTPUT_DIR` | `/output`; local runner sets a run-specific directory |
-| `RJ_MODEL_ASSESSOR` | `gemma-4-31b-it` |
-| `RJ_MODEL_PROPOSER` | `gemma-4-31b-it` |
-| `RJ_MODEL_BASELINE` | `gemma-4-31b-it`; must equal assessor for the same-model comparison |
+| `RJ_MODEL_ASSESSOR` | `gemma-4-26b-a4b-it` |
+| `RJ_MODEL_PROPOSER` | `gemma-4-26b-a4b-it` |
+| `RJ_MODEL_BASELINE` | `gemma-4-26b-a4b-it`; must equal assessor for the same-model comparison |
 | `RJ_RPM` | 25 client-side requests/minute |
 | `RJ_TPM` | 15000 estimated input tokens/minute |
-| `RJ_MAX_CONCURRENCY` | 4 workers; the rate limiter still applies |
+| `RJ_MAX_CONCURRENCY` | 8 workers; the rate limiter still applies |
 | `RJ_TIME_BUDGET_S` | 3000 seconds per stage |
 | `RJ_MAX_INDUCTION_CALLS` | 40 maximum proposer calls |
 | `RJ_S_FRACTION` | 0.2 training selection fraction |
@@ -108,7 +108,7 @@ Quota is project-wide; multiple keys do not create independent quota. Supplied e
 - Other `jury/` files contain training assessments and provenance for local audit, not runtime inference. They may contain sensitive training text; do not publish them indiscriminately.
 - `rulejudge/gemma_client.py`: actual Gemini API SDK calls, feature fallbacks, rate limiting, caching and usage records.
 - `rulejudge/assessor.py`: learned-rule prompt and per-item assessment.
-- `rulejudge/induction.py`: training-only rule proposer/consolidation.
+- `rulejudge/induction.py`: training-only rule proposer/consolidation, plus the fixed general check `R00` (`general_rule`, `add_general_rule`).
 - `rulejudge/baseline.py`: same-model zero-shot comparison without learned requirements.
 
 For a short demo: run the fake plumbing smoke first, then show a **clearly labeled** real completed run if available; open its manifest, runtime rulebook and generated explanation; finish with the real comparison report and limitations. Cached or recorded outputs must be described as cached or recorded, not live inference.
