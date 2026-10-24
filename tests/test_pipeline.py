@@ -4,6 +4,8 @@ import hashlib
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stderr
@@ -234,6 +236,30 @@ class PipelineTests(unittest.TestCase):
         with patch.dict(os.environ, {"RJ_STRICT": "1"}):
             with self.assertRaises(ValueError):
                 pipeline.run_eval(self.settings, self.client)
+
+    def test_cli_uses_fake_flag_and_environment_directories(self):
+        env = {"RJ_INPUT_DIR": self.settings.input_dir, "RJ_ARTIFACTS_DIR": self.settings.artifacts_dir,
+               "RJ_OUTPUT_DIR": self.settings.output_dir, "RJ_FAKE_LLM": "1"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(pipeline.main(["adapt"]), 0)
+            made_settings = self.mocks["gemma_client.make_client"].call_args.args[0]
+            self.assertTrue(made_settings.fake_llm)
+            self.assertEqual(made_settings.input_dir, self.settings.input_dir)
+            self.assertEqual(pipeline.main(["eval"]), 0)
+        self.assertEqual(self._predictions(), {"test-good": "good", "test-bad": "bad"})
+
+    def test_python_module_entrypoint_without_network(self):
+        # Stubs may degrade adapt on this branch; real merged WPs use FakeLLMClient.
+        # Either case must produce a valid priors-first CLI bundle and complete CSV.
+        env = dict(os.environ, RJ_INPUT_DIR=self.settings.input_dir,
+                   RJ_ARTIFACTS_DIR=self.settings.artifacts_dir, RJ_OUTPUT_DIR=self.settings.output_dir,
+                   RJ_FAKE_LLM="1", RJ_STRICT="0", RJ_TIME_BUDGET_S="5")
+        for command in ("adapt", "eval"):
+            result = subprocess.run([sys.executable, "-m", "rulejudge", command],
+                                    cwd=Path(__file__).resolve().parents[1], env=env,
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(set(self._predictions()), {"test-good", "test-bad"})
 
     def test_cli_dispatch_help_usage_and_invalid_environment(self):
         with patch("rulejudge.pipeline.run_adapt", return_value=0) as adapt:
