@@ -15,7 +15,7 @@
 
 ## 1. Shared context — paste this to EVERY agent
 
-You are one of several engineers working **in parallel** on a hackathon entry. **Your time box ends 14:45 CEST**: push whatever passes tests by then. Work **only** in the files your work package owns, plus its tests. Push branch `wp<N>-<slug>` and do **not** merge into `main`.
+You are one of several engineers working **in parallel** on a hackathon entry. **Your time box ends 14:45 CEST**: push whatever passes tests by then. Work **only** in the files your work package owns, plus its tests. Commit on your branch `wp<N>-<slug>` inside your own git worktree (see `docs/AGENT_RULES.md`); do **not** push or merge — the integrator merges local branches.
 
 ### The task
 
