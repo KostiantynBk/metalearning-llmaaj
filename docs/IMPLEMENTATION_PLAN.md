@@ -148,6 +148,7 @@ Implement the stubs in `io_contract.py`, `priors.py`, `artifacts.py` and `pipeli
   2. `docker build -t rulejudge .`
   3. `docker run --rm -e GEMINI_API_KEY -v <abs>/runs/<ts>/input:/input:ro -v <abs>/runs/<ts>/artifacts:/artifacts rulejudge adapt`
   4. `docker run --rm -e GEMINI_API_KEY -v <abs>/input:/input:ro -v <abs>/artifacts:/artifacts:ro -v <abs>/output:/output rulejudge eval`
+   - Pass the key with `--env-file .env` when `.env` exists (it is git-ignored and must never be committed or printed).
   5. `python src/evaluate.py --test data/public_test.csv --predictions runs/<ts>/output/predictions.csv --out runs/<ts>/score.json`
 
 **Tests:**
@@ -441,7 +442,7 @@ Escape `<` and `>` in excerpts and collapse newlines. **Never invent examples**:
    - wall time;
    - token usage.
 
-Test labels are used **only** for scoring. `--fake` sets `RJ_FAKE_LLM=1` with a scripted responder, for a dry run.
+Test labels are used **only** for scoring. `--fake` sets `RJ_FAKE_LLM=1` with a scripted responder, for a dry run. If `.env` exists in the repo root (git-ignored; holds `GEMINI_API_KEY`), load it with a tiny stdlib `KEY=VALUE` parser **without printing values**; never require it in tests.
 
 **`docs/README_SOLUTION_DRAFT.md`** (prose only; the integrator merges it into README):
 - what it is and who it's for;
