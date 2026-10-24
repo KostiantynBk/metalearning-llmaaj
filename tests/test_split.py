@@ -79,6 +79,19 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(set(f_ids), {i.item_id for i in items})
         self.assertEqual(s_ids, [])
 
+    def test_large_duplicate_groups_keep_minimum_selection_when_possible(self):
+        # Six rows per topic in two indivisible groups of three: target=1 cannot
+        # be hit exactly, but an actual 3/3 split is possible and must not be lost.
+        items = []
+        for topic in TOPICS:
+            for group in range(2):
+                for n in range(3):
+                    items.append(make_item(f"{topic}-{group}-{n}", topic, "good",
+                                           assistant=f"Group {group}"))
+        f_ids, s_ids = split_fs(items)
+        self.assertEqual((len(f_ids), len(s_ids)), (12, 12))
+        self.assertEqual(split_fs(list(reversed(items))), (f_ids, s_ids))
+
     def test_seed_changes_membership_but_not_stratum_counts(self):
         items = toy_dataset(10, 10)
         a, b = split_fs(items, seed="first"), split_fs(items, seed="second")

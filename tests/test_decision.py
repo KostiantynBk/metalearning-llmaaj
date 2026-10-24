@@ -6,7 +6,7 @@ from pathlib import Path
 from rulejudge.contracts import Assessment, HeadParams, TOPICS
 from rulejudge.decision import (apply_floor, decide, fit_fitted_head, refit_final,
                                 rule_stats, select_head, topic_macro_accuracy)
-from tests.fixtures import make_item, toy_dataset
+from tests.fixtures import make_item
 
 PRIORS = {"by_topic": {"credit": "bad"}, "global": "good"}
 
@@ -201,6 +201,19 @@ class DecisionTest(unittest.TestCase):
                 self.assertEqual(chosen.kind, expected)
                 self.assertIsNone(report["S_prior"])
 
+    def test_floor_rejects_a_prior_that_wins_only_one_partition(self):
+        head = HeadParams("fixed")
+        for f_label, s_label in [("bad", "good"), ("good", "bad")]:
+            with self.subTest(f_label=f_label, s_label=s_label):
+                f, s = make_item("f", label=f_label), make_item("s", label=s_label)
+                aa = {i.item_id: assessed(i, {"R01": 3}) for i in (f, s)}
+                chosen, report = apply_floor(head, [f], [s], aa, {"global": "good"})
+                self.assertIs(chosen, head)
+                self.assertFalse(report["applied"])
+        chosen, report = apply_floor(head, [], [], {}, {"global": "good"})
+        self.assertIs(chosen, head)
+        self.assertFalse(report["applied"])
+
     def test_refit_only_fitted_and_does_not_mutate(self):
         items = [make_item(f"g{i}", label="good") for i in range(3)]
         aa = {i.item_id: assessed(i, {"R01": 3}) for i in items}
@@ -229,6 +242,27 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(stats["R02"], {"applicable": 2, "triggered": 2, "triggered_bad": 1,
                                         "triggered_good": 1, "sole_triggered": 0,
                                         "precision": 0.5, "disabled": True})
+
+    def test_fit_and_stats_are_permutation_invariant(self):
+        items = [make_item(f"g{i}", label="good") for i in range(5)]
+        items += [make_item(f"b{i}", label="bad") for i in range(3)]
+        aa = {i.item_id: assessed(i, {"R02": 3 if i.label == "bad" else 0,
+                                      "R01": 3 if i.label == "good" else 0}) for i in items}
+        forward = fit_fitted_head(items, aa, PRIORS)
+        reversed_aa = {iid: Assessment(a.item_id, a.status, dict(reversed(list(a.support.items()))))
+                       for iid, a in reversed(list(aa.items()))}
+        self.assertEqual(forward, fit_fitted_head(list(reversed(items)), reversed_aa, PRIORS))
+        self.assertEqual(rule_stats(items, aa, forward),
+                         rule_stats(list(reversed(items)), reversed_aa, forward))
+
+    def test_rule_stats_preserves_requested_but_missing_rules(self):
+        item = make_item("i", label="good")
+        assessment = assessed(item, {"R01": 0}, "partial")
+        assessment.requested_rule_ids = ["R01", "R02"]
+        stats = rule_stats([item], {"i": assessment}, HeadParams("fixed"))
+        self.assertEqual(stats["R02"]["applicable"], 0)
+        self.assertEqual(stats["R02"]["triggered"], 0)
+        self.assertIsNone(stats["R02"]["precision"])
 
     def test_rule_stats_na_and_zero_trigger_precision(self):
         item = make_item("i", label="good")

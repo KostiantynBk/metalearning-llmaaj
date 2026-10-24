@@ -15,8 +15,9 @@ def split_fs(items: list[Item], s_fraction: float = 0.2, seed: str = "rulejudge-
 
     S targets round(s_fraction * n) per stratum, with a minimum of one for n >= 3.
     Duplicate groups are indivisible: choose the closest group boundary to the
-    target (ties favour S). Conflicting-label duplicates follow the first stratum
-    assigning their group. These constraints may make the target approximate.
+    target (ties favour S), forcing a nonempty S for a positive target. Groups
+    spanning conflicting labels share one assignment; a later stratum may promote
+    a group to S to meet its minimum. Group constraints make targets approximate.
     """
     if not math.isfinite(s_fraction) or not 0 <= s_fraction <= 1:
         raise ValueError("s_fraction must be finite and between zero and one")
@@ -29,13 +30,11 @@ def split_fs(items: list[Item], s_fraction: float = 0.2, seed: str = "rulejudge-
 
     ordered_ids = sorted(ids, key=order)
     # Labels are deliberately excluded, so contradictory duplicates cannot leak.
-    groups = defaultdict(list)
     content_key = {}
     strata = defaultdict(list)
     for item in items:
         key = canonical_json({"topic": item.topic, "context": item.context,
                               "conversation": item.conversation})
-        groups[key].append(item.item_id)
         content_key[item.item_id] = key
         strata[(item.topic, item.label)].append(item.item_id)
 
@@ -58,6 +57,12 @@ def split_fs(items: list[Item], s_fraction: float = 0.2, seed: str = "rulejudge-
             assignment[key] = use_s
             if use_s:
                 selected += size
+        if target > 0 and selected == 0:
+            # A large group must not make us abandon a feasible split merely
+            # because every nonempty boundary overshoots the fractional target.
+            # Dict insertion order follows the hash ordering, resolving ties.
+            closest = min(group_counts, key=lambda key: abs(group_counts[key] - target))
+            assignment[closest] = True
 
     s_ids = [iid for iid in ordered_ids if assignment[content_key[iid]]]
     f_ids = [iid for iid in ordered_ids if not assignment[content_key[iid]]]
