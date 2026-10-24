@@ -54,6 +54,13 @@ If using a git-ignored root `.env` instead of an exported key, replace `-e GEMIN
 
 Expected organizer input files are `/input/train.jsonl` (labeled) and `/input/test.jsonl` (unlabeled). Output is `/output/predictions.csv`, header exactly `item_id,label`, every test ID exactly once, labels exactly `good` or `bad`. Adapt and eval are separate containers; eval never reads training examples or jury-only files.
 
+### Organizer run on private data
+
+- **Key.** Pass your own key to both containers as `GEMINI_API_KEY` (`-e GEMINI_API_KEY` or `--env-file`). The google-genai SDK also accepts `GOOGLE_API_KEY` and uses it if both are set. The key needs Gemini API access to `gemma-4-26b-a4b-it`. Nothing is baked into the image.
+- **Network.** Both containers need outbound HTTPS to the Gemini API (`generativelanguage.googleapis.com`). Without it every call fails. Eval still writes a valid CSV, but it then holds training topic-majority predictions only.
+- **Time.** The defaults throttle to free-tier-safe rates (`RJ_RPM=25`, `RJ_TPM=15000`). At those rates, expect about 45–50 min for adapt on 190 training items and about 30 min for eval on 296 test items. If your key has higher limits, raise `RJ_RPM`, `RJ_TPM` and `RJ_MAX_CONCURRENCY` below them for a faster run. If a container has a hard time limit, set `RJ_TIME_BUDGET_S` a few minutes below it. At the budget, adapt still commits a learned bundle and eval keeps its checkpointed CSV complete.
+- **Jury artifact.** `/artifacts/manifest.json` points to the selected bundle; the explanation is `bundles/<id>/jury/explanation.md`.
+
 ## Local public comparison and dry run
 
 ```sh
