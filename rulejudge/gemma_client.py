@@ -131,8 +131,8 @@ class GemmaClient:
     @staticmethod
     def _rejected_feature(message, flags):
         low = message.lower()
-        features = (("system_instruction", ("system instruction", "system_instruction", "developer instruction")),
-                    ("response_mime_type", ("response_mime_type", "response mime type")),
+        features = (("system_instruction", ("system instruction", "system_instruction", "systeminstruction", "developer instruction")),
+                    ("response_mime_type", ("response_mime_type", "response mime type", "responsemimetype", "json mode")),
                     ("thinking_config", ("thinking",)))
         for feature, names in features:
             if flags[feature] and any(name in low for name in names):

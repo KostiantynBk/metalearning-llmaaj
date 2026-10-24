@@ -1,5 +1,9 @@
 """All transports are synthetic. No SDK, API key or network needed."""
+import builtins
+import importlib
+import importlib.util
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -65,6 +69,39 @@ class TestGemmaClient(unittest.TestCase):
         self.assertEqual(preflight(FakeLLMClient()), (True, "ok"))
         self.assertEqual(preflight(FakeLLMClient(responder=lambda *a: LLMResult(False, error_kind="auth"))),
                          (False, "auth"))
+
+    def test_import_without_google_sdk(self):
+        original = builtins.__import__
+        def no_google(name, *args, **kwargs):
+            if name == "google" or name.startswith("google."):
+                raise ImportError("SDK deliberately unavailable")
+            return original(name, *args, **kwargs)
+        with patch("builtins.__import__", no_google):
+            module = importlib.reload(importlib.import_module("rulejudge.gemma_client"))
+            result = self.call(module.GemmaClient(self.settings, transport=lambda **kw: LLMResult(True, text="{}")))
+        self.assertTrue(result.ok)
+
+    def test_smoke_env_loader_uses_mock_file_only(self):
+        spec = importlib.util.spec_from_file_location("smoke_gemma_test", Path(__file__).resolve().parents[1] / "scripts" / "smoke_gemma.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for assignment in ('GEMINI_API_KEY="synthetic"', "export GEMINI_API_KEY='synthetic'",
+                           'GEMINI_API_KEY=synthetic # comment'):
+            with self.subTest(assignment=assignment), patch.dict(os.environ, {}, clear=True):
+                with patch.object(Path, "read_text", return_value="# synthetic only\n" + assignment):
+                    module._load_api_key(Path("not-a-real-repo"))
+                self.assertEqual(os.environ["GEMINI_API_KEY"], "synthetic")
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "existing"}, clear=True):
+            with patch.object(Path, "read_text", side_effect=AssertionError("must not read")):
+                module._load_api_key(Path("not-a-real-repo"))
+            self.assertEqual(os.environ["GEMINI_API_KEY"], "existing")
+
+    def test_json_mode_wording_and_retry_delay_object(self):
+        client = self.client([APIError(400, "JSON mode is not enabled for this model"),
+                              APIError(429, 'retryDelay: {"seconds": 4}'), LLMResult(True, text="{}")])
+        self.assertTrue(self.call(client).ok)
+        self.assertNotIn("response_mime_type", self.calls[-1]["config"])
+        self.assertEqual(self.clock.sleeps, [4])
 
     def test_rate_limit_then_success_honors_delay(self):
         client = self.client([APIError(429, 'retryDelay: "3s"'), LLMResult(True, text="{}")])
