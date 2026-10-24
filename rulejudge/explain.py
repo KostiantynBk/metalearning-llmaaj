@@ -157,6 +157,12 @@ def _metric(value) -> str:
     return f"{value:.4f}" if isinstance(value, (int, float)) else "not recorded"
 
 
+def _precision(stat) -> str:
+    if "precision" not in stat:
+        return "not recorded"
+    return "undefined (no triggers)" if stat["precision"] is None else _metric(stat["precision"])
+
+
 def _prior(report, topic):
     """Recover the exact majority label from reported training counts, if available."""
     priors = report.get("priors", {})
@@ -252,7 +258,11 @@ def render_explanation(report: dict) -> str:
               "The incumbent wins selection ties. If S is empty, use the fitted candidate. The majority-prior floor switches to "
               "prior-only only when the prior is strictly better on both F and S (F only when S is empty). "
               "A selected fitted head is then refitted on all training items; its final threshold/disabled list above can differ.",
+              f"Selection reason: {_text(selection.get('reason', 'not recorded'))}. "
               f"Recorded floor outcome: {_text(to_jsonable(selection.get('floor', 'not recorded')))}.", "",
+              "Fitted-head search tests τ ∈ {1, 2, 3}. It may disable at most three rules, each with at least three "
+              "training triggers and precision below 0.5, only when disabling does not reduce fitting accuracy. "
+              "Threshold ties prefer τ = 2, then the lower threshold.", "",
               "## 2. Rules learned from this training set", "",
               "Rules are hypotheses inferred from labels, not expert-authored instructions. List order conveys induction priority; "
               "at decision time every active rule has the same non-compensating veto.", "",
@@ -263,14 +273,16 @@ def render_explanation(report: dict) -> str:
         stat = stats.get(rule.rule_id, {})
         lines.append(f"| {_text(rule.rule_id)} | {_text(rule.text)} | {_text(rule.applies_when or 'Always within scope')} | "
                      f"{_text(rule.scope)} | {'disabled' if rule.rule_id in head.disabled else 'active'} | "
-                     f"{_text(stat.get('triggered_bad', 'not recorded'))}/{_text(stat.get('triggered_good', 'not recorded'))} | {_metric(stat.get('precision'))} |")
+                     f"{_text(stat.get('triggered_bad', 'not recorded'))}/{_text(stat.get('triggered_good', 'not recorded'))} | {_precision(stat)} |")
     if not rulebook.rules:
         lines.append("No learned rules in this bundle.")
     for rule in rulebook.rules:
         lines += [f"- **{_text(rule.rule_id)}** — Violation: {_text(rule.violation or 'As stated in the requirement')}. "
                   f"Not a violation: {_text(rule.boundary or 'No explicit boundary inferred')}."]
     lines += ["", "Precision is labelled-bad triggers / all labelled triggers; no triggers means precision is undefined. "
-              "These are training diagnostics, not held-out performance estimates.", "", "## 3. Training evidence", "",
+              "Counts use labelled ok/partial assessments. Disabled-rule counts show hypothetical threshold crossings "
+              "for diagnosis only, not active vetoes. These are training diagnostics, not held-out performance estimates.",
+              "", "## 3. Training evidence", "",
               "Examples below come only from this run's real training assessments × provided labels. "
               "A boundary pass is for the named rule only; another rule can still veto the conversation.", ""]
     for rule in rulebook.rules:
@@ -299,7 +311,7 @@ def render_explanation(report: dict) -> str:
         stat = stats.get(rid, {})
         lines.append(f"- {_text(rid)}: disabled; recorded triggers bad/good = "
                      f"{_text(stat.get('triggered_bad', 'not recorded'))}/{_text(stat.get('triggered_good', 'not recorded'))}; "
-                     f"precision {_metric(stat.get('precision'))}. It cannot veto.")
+                     f"precision {_precision(stat)}. It cannot veto.")
     lines += ["", "### Bad training items with no active trigger", "",
               "These are rule-coverage misses, not necessarily wrong final predictions: a fallback prior can still return bad."]
     missed = diagnostics["missed"]
@@ -312,7 +324,18 @@ def render_explanation(report: dict) -> str:
         lines += _show_example(report, row)
     false_alarms = {row["item_id"] for rule in rulebook.rules
                     for row in diagnostics[rule.rule_id]["false_alarm"]}
-    lines += [f"False alarms: {len(false_alarms)} distinct expert-good items with an active veto.",
+    lines += ["", "### False alarms", "",
+              f"False alarms: {len(false_alarms)} distinct expert-good items with an active veto."]
+    for iid in sorted(false_alarms)[:2]:
+        item = items[iid]
+        rid = next(rule.rule_id for rule in rulebook.rules
+                   if any(row["item_id"] == iid for row in diagnostics[rule.rule_id]["false_alarm"]))
+        lines += _show_example(report, _record(item, assessments[iid], head, rid), rid)
+    if not false_alarms:
+        lines.append("no false-alarm training example found")
+    unassessed = sum(item.label in ("good", "bad") and item.item_id not in assessments
+                     for item in items.values())
+    lines += ["", f"Training items without an assessment: {unassessed}; not presented as model-output examples.",
               f"No rule applied (complete all-na or empty assessments): {len(diagnostics['no_rule_applied'])} items.",
               f"Failed assessments: {_text(report.get('fallbacks', {}).get('failed', 'not recorded'))}; "
               f"partial assessments: {_text(report.get('fallbacks', {}).get('partial', 'not recorded'))}. "

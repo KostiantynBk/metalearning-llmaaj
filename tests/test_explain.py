@@ -242,6 +242,36 @@ class ExplanationTests(unittest.TestCase):
         self.assertIn("No rule applied (complete all-na or empty assessments): 1 items", text)
         self.assertIn("False alarms: 1 distinct", text)
 
+    def test_precision_and_disabled_counts_are_diagnostic_not_active_vetoes(self):
+        text = render_explanation(self.report)
+        self.assertIn("undefined (no triggers)", text)
+        self.assertIn("Disabled-rule counts show hypothetical threshold crossings", text)
+        self.assertIn("R02: disabled; recorded triggers bad/good = 0/12", text)
+        self.assertIn("It cannot veto", text)
+
+    def test_wp5_selection_report_shape_and_reason(self):
+        self.report["selection"]["chosen"] = {"kind": "fitted", "tau": 2, "disabled": ["R02"], "fit_on": "F"}
+        self.report["selection"]["reason"] = "best_S"
+        self.report["selection"]["floor"] = {"applied": False, "F_head": .8, "F_prior": .6,
+                                                "S_head": .75, "S_prior": .5,
+                                                "reason": "prior_not_strictly_better", "comparison": "F_and_S"}
+        text = render_explanation(self.report)
+        self.assertIn("Selection reason: best\\_S", text)
+        self.assertIn("prior\\_not\\_strictly\\_better", text)
+        self.assertIn("0.7500", text)
+
+    def test_generation_does_not_mutate_report_or_source_assessments(self):
+        before = copy.deepcopy(self.report)
+        render_explanation(self.report)
+        self.assertEqual(self.report, before)
+
+    def test_missing_assessments_are_disclosed_not_used_as_examples(self):
+        del self.report["assessments"]["spe-b1"]
+        del self.report["examples"]
+        text = render_explanation(self.report)
+        self.assertIn("Training items without an assessment: 1", text)
+        self.assertNotIn("**Training item spe-b1**", text)
+
     def test_prior_head_never_claims_rule_veto_determines_predictions(self):
         self.report["head"] = HeadParams("prior")
         del self.report["examples"]
