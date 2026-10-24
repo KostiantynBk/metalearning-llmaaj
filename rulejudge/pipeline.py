@@ -15,8 +15,8 @@ from typing import Optional
 
 from . import assessor, decision, explain, gemma_client, induction, split
 from .artifacts import ArtifactStore
-from .contracts import (HeadParams, LLMClient, Settings, canonical_json,
-                        item_text_for_hash, stable_hash, to_jsonable)
+from .contracts import (SRC_FALLBACK, SRC_PRIOR_MODE, HeadParams, LLMClient,
+                        Settings, canonical_json, item_text_for_hash, stable_hash, to_jsonable)
 from .io_contract import load_items, write_predictions_atomic
 from .priors import fit_priors, prior_label
 
@@ -132,6 +132,7 @@ def run_adapt(settings: Settings, client: Optional[LLMClient] = None) -> int:
                          S_macro=_metric(s_items, assessments, candidate, priors).get("macro"))
                                       for candidate in (fixed, fitted)],
                      "chosen": to_jsonable(head), "selected_before_floor": to_jsonable(selected),
+                     "reason": selection_report.get("reason"),
                      "selection_report": selection_report, "floor": floor,
                      "f_size": len(f_items), "s_size": len(s_items)}
         runtime_rulebook = to_jsonable(rulebook)
@@ -177,6 +178,8 @@ def run_adapt(settings: Settings, client: Optional[LLMClient] = None) -> int:
 def run_eval(settings: Settings, client: Optional[LLMClient] = None) -> int:
     """Write complete priors first, then atomically checkpoint model decisions."""
     settings.start_clock()
+    # A reused Settings object must not report counts from an earlier eval.
+    settings.eval_source_counts = {}
     try:
         rt = ArtifactStore(settings.artifacts_dir).load_runtime()
         items = load_items(str(Path(settings.input_dir) / "test.jsonl"), require_labels=False)
@@ -185,6 +188,9 @@ def run_eval(settings: Settings, client: Optional[LLMClient] = None) -> int:
         priors, head = rt["priors"], rt["head"]
         labels = {item.item_id: prior_label(priors, item.topic) for item in items}
         write_predictions_atomic(path, labels, ids)
+        # Exact sources from the decide() contract: prior head versus no assessment.
+        prior_source = SRC_PRIOR_MODE if head.kind == "prior" else SRC_FALLBACK
+        settings.eval_source_counts = {prior_source: len(items)}
     except Exception as error:
         if _strict():
             raise
@@ -209,14 +215,23 @@ def run_eval(settings: Settings, client: Optional[LLMClient] = None) -> int:
             return 0
 
         def checkpoint(finished: dict) -> None:
-            current = {item.item_id: (decision.decide(item, finished[item.item_id], head, priors).label
-                                     if item.item_id in finished else prior_label(priors, item.topic))
-                       for item in items}
+            current, checkpoint_sources = {}, Counter()
+            for item in items:
+                if item.item_id in finished:
+                    result = decision.decide(item, finished[item.item_id], head, priors)
+                    current[item.item_id] = result.label
+                    checkpoint_sources[result.source] += 1
+                else:
+                    current[item.item_id] = prior_label(priors, item.topic)
+                    checkpoint_sources[SRC_FALLBACK] += 1
             write_predictions_atomic(path, current, ids)
+            # Update only after replacement succeeds: counts describe the on-disk CSV.
+            settings.eval_source_counts = dict(checkpoint_sources)
 
         assessments = assessor.assess_many(items, rt["rulebook"], client, settings, on_progress=checkpoint)
         checkpoint(assessments)
         sources = Counter(decision.decide(item, assessments.get(item.item_id), head, priors).source for item in items)
+        settings.eval_source_counts = dict(sources)
         print(f"Eval wrote {len(items)} predictions: {json.dumps(dict(sorted(sources.items())), sort_keys=True)}",
               file=sys.stderr, flush=True)
         return 0

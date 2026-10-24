@@ -132,6 +132,10 @@ class PipelineTests(unittest.TestCase):
         expected = {"run_info", "rulebook", "head", "selection", "rule_stats", "examples", "metrics",
                     "fallbacks", "induction_notes", "hashes", "items_by_id", "assessments"}
         self.assertEqual(set(report), expected)
+        self.assertEqual(report["selection"]["reason"], "tie")
+        self.assertEqual(report["selection"]["selection_report"], {"reason": "tie"})
+        saved_selection = json.loads((path / "jury" / "selection.json").read_text())
+        self.assertEqual(saved_selection["reason"], "tie")
         fingerprint = stable_hash([item_text_for_hash(i) + i.label for i in self.train])
         self.assertEqual(report["run_info"]["train_fingerprint"], fingerprint)
         self.assertTrue(report["run_info"]["run_id"].endswith(fingerprint[:6]))
@@ -142,6 +146,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self._predictions(), {"test-good": "good", "test-bad": "bad"})
         self.assertEqual(self.settings.model_assessor, rt["assessor_config"]["model"])
         self.assertIn('"model": 2', self.stderr.getvalue())
+        self.assertEqual(self.settings.eval_source_counts, {"model": 2})
 
     def test_prior_bundle_committed_before_first_model_call(self):
         def preflight(client):
@@ -156,6 +161,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(pipeline.run_eval(self.settings, self.client), 0)
         self.assertEqual(self._predictions(), {"test-good": "good", "test-bad": "good"})
         self.mocks["assessor.assess_many"].assert_not_called()
+        self.assertEqual(self.settings.eval_source_counts, {"prior_mode": 2})
         self.assertIn("daily_quota", self.stderr.getvalue())
 
     def test_eval_failed_preflight_keeps_valid_prior_csv(self):
@@ -166,6 +172,7 @@ class PipelineTests(unittest.TestCase):
         self.mocks["gemma_client.preflight"].side_effect = preflight
         self.assertEqual(pipeline.run_eval(self.settings, self.client), 0)
         self.assertEqual(self._predictions()["test-bad"], "good")
+        self.assertEqual(self.settings.eval_source_counts, {"fallback_prior": 2})
         self.assertIn("auth", self.stderr.getvalue())
 
     def test_explanation_failure_retains_prior_bundle(self):
@@ -196,6 +203,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(pipeline.run_eval(self.settings, self.client), 0)
         self.assertEqual(self._predictions(), {"test-good": "good", "test-bad": "bad"})
         self.assertIn("simulated outage", self.stderr.getvalue())
+        self.assertEqual(self.settings.eval_source_counts, {"model": 1, "fallback_prior": 1})
+
+    def test_eval_source_counts_reset_and_track_missing_assessments(self):
+        self._adapt()
+        self.settings.eval_source_counts = {"stale": 999}
+        self.mocks["assessor.assess_many"].side_effect = lambda *args, **kwargs: {
+            "test-bad": Assessment("test-bad", "ok", {"R01": 3})}
+        self.assertEqual(pipeline.run_eval(self.settings, self.client), 0)
+        self.assertEqual(self.settings.eval_source_counts, {"model": 1, "fallback_prior": 1})
+        self.assertEqual(self._predictions(), {"test-good": "good", "test-bad": "bad"})
+        self.mocks["gemma_client.preflight"].side_effect = lambda client: (False, "auth")
+        self.assertEqual(pipeline.run_eval(self.settings, self.client), 0)
+        self.assertEqual(self.settings.eval_source_counts, {"fallback_prior": 2})
+        (self.root / "input" / "test.jsonl").write_text("bad", encoding="utf-8")
+        self.assertEqual(pipeline.run_eval(self.settings, self.client), 2)
+        self.assertEqual(self.settings.eval_source_counts, {})
 
     def test_cache_override_supported_in_both_stages(self):
         cache = str(self.root / "shared-cache")
@@ -213,6 +236,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(pipeline.run_eval(self.settings, self.client), 0)
         self.assertEqual(calls, self.mocks["gemma_client.preflight"].call_count)
         self.assertEqual(self._predictions()["test-bad"], "good")
+        self.assertEqual(self.settings.eval_source_counts, {"prior_mode": 2})
 
     def test_invalid_input_or_artifact_returns_two(self):
         self.assertEqual(pipeline.run_eval(self.settings, self.client), 2)
