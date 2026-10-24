@@ -198,6 +198,49 @@ class InductionTests(unittest.TestCase):
         self.assertIn("Previous response was invalid", client.calls[2]["user"])
         self.assertTrue(any("fallback" in w for w in log["warnings"]))
 
+    def test_unsafe_consolidation_retries_then_uses_clean_candidates(self):
+        def responder(role, system, user):
+            if system == STAGE1_SYSTEM:
+                return happy_responder(role, system, user)
+            return json.dumps({"rules": [{"text": "Tell Ana the correct date.",
+                                           "merged_candidates": ["C1"]}]})
+        client = FakeLLMClient(responder)
+        book, log = induce_rulebook(pair_items(), client, Settings())
+        self.assertEqual(log["calls"], 3)
+        self.assertTrue(book.rules)
+        self.assertNotIn("Ana", book.rules[0].text)
+        self.assertTrue(any("rubric validation" in warning for warning in log["warnings"]))
+
+    def test_explicit_empty_consolidated_rubric_is_not_a_parse_failure(self):
+        def responder(role, system, user):
+            if system == STAGE1_SYSTEM:
+                return happy_responder(role, system, user)
+            return '{"rules":[],"notes":["No generalizable difference was found."]}'
+        book, log = induce_rulebook(pair_items(), FakeLLMClient(responder), Settings())
+        self.assertFalse(book.rules)
+        self.assertEqual(log["calls"], 2)
+        self.assertIn("No generalizable difference was found.", book.notes)
+
+    def test_cross_topic_fallback_deduplication_merges_provenance(self):
+        items = pair_items("credit") + pair_items("savings")
+        def responder(role, system, user):
+            return happy_responder(role, system, user) if system == STAGE1_SYSTEM else "invalid"
+        book, log = induce_rulebook(items, FakeLLMClient(responder), Settings())
+        self.assertEqual(len(book.rules), 1)
+        self.assertEqual(book.rules[0].scope, "global")
+        self.assertEqual(book.rules[0].provenance_ids, sorted(i.item_id for i in items))
+        self.assertEqual(log["calls"], 4)
+
+    def test_unused_good_samples_are_at_most_four_per_topic(self):
+        items = pair_items() + [make_item(f"unused-private-{n}", label="good", assistant=f"Accepted alternative {n}.")
+                                for n in range(9)]
+        client = FakeLLMClient(happy_responder)
+        induce_rulebook(items, client, Settings())
+        user = client.calls[1]["user"]
+        self.assertEqual(user.count("ACCEPTED credit "), 4)
+        self.assertNotIn("Accepted alternative 4.", user)
+        self.assertNotIn("Accepted alternative 8.", user)
+
     def test_consolidation_second_attempt_succeeds(self):
         counter = 0
         def responder(role, system, user):
