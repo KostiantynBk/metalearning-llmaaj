@@ -17,7 +17,7 @@ LABELS = ("good", "bad")
 TOPICS = ("credit", "financial_position", "savings", "spending")
 NA = "na"                       # rule does not apply to this conversation
 SUPPORT_LEVELS = (0, 1, 2, 3)   # 0 none, 1 ambiguous, 2 supported, 3 clear violation
-MAX_RULES = 16
+MAX_RULES = 12                  # input-token budget (Gemma free tier ~16K input tokens/min)
 ROLES = ("assessor", "proposer", "baseline")
 SupportValue = Union[int, str]  # 0..3 or "na"
 
@@ -121,7 +121,8 @@ class Settings:
     model_proposer: str = "gemma-4-31b-it"
     model_baseline: str = "gemma-4-31b-it"
     max_concurrency: int = 4
-    rpm_limit: int = 15                 # client-side requests/minute cap (all roles together)
+    rpm_limit: int = 25                 # client-side requests/minute cap (API limit 30)
+    tpm_limit: int = 15000              # client-side input tokens/minute cap (API limit ~16K)
     time_budget_s: float = 3000.0       # per stage (adapt or eval)
     deadline_epoch: float = 0.0         # absolute time.time() deadline; 0 = none
     max_content_attempts: int = 2       # parse/validation attempts per assessment (main pass)
@@ -140,7 +141,7 @@ class Settings:
             "RJ_INPUT_DIR": ("input_dir", str), "RJ_ARTIFACTS_DIR": ("artifacts_dir", str),
             "RJ_OUTPUT_DIR": ("output_dir", str), "RJ_MODEL_ASSESSOR": ("model_assessor", str),
             "RJ_MODEL_PROPOSER": ("model_proposer", str), "RJ_MODEL_BASELINE": ("model_baseline", str),
-            "RJ_MAX_CONCURRENCY": ("max_concurrency", int), "RJ_RPM": ("rpm_limit", int),
+            "RJ_MAX_CONCURRENCY": ("max_concurrency", int), "RJ_RPM": ("rpm_limit", int), "RJ_TPM": ("tpm_limit", int),
             "RJ_TIME_BUDGET_S": ("time_budget_s", float),
             "RJ_MAX_INDUCTION_CALLS": ("max_induction_calls", int),
             "RJ_S_FRACTION": ("s_fraction", float), "RJ_CHECKPOINT_EVERY": ("checkpoint_every", int),

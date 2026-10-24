@@ -13,6 +13,21 @@
 
 ---
 
+## 0. Rate-limit addendum (13:50) — read first; it overrides numbers below
+
+**Measured per model in AI Studio** (`gemma-4-31b-it` and `gemma-4-26b-a4b-it`): about **30 requests/min, ~16K INPUT tokens/min, ~14.4K requests/day**. Input tokens per minute is the bottleneck: every request's prompt counts. Consequences, already applied in the sections below:
+
+- `contracts.MAX_RULES` = **12**; `Settings.rpm_limit` = 25 and new `Settings.tpm_limit` = 15000 (env `RJ_RPM`, `RJ_TPM`).
+- WP2 must enforce the **input-token limiter** (estimate = ceil(len(system + user) / 2.5), corrected by `usage_metadata.prompt_token_count`).
+- WP3 renders rules compactly. WP4 enforces a total rubric ≤ **3,500 characters** and smaller batches.
+- Target ≈ 1,700 input tokens per assessor call (system ~350 + rubric ≤ ~900 + item ~450), which allows ~9 calls/min:
+  - public run (induction + 150 adapt + 80 eval + 80 baseline) ≈ 35 min;
+  - private organizer run: adapt ≈ 25 min, eval ≈ 32 min.
+- WP1 supports `RJ_CACHE_DIR`, so the integrator can replay a finished local run inside Docker without new API calls.
+- WP7 adds stratified `--limit-train/--limit-test` smoke subsets.
+
+---
+
 ## 1. Shared context — paste this to EVERY agent
 
 You are one of several engineers working **in parallel** on a hackathon entry. **Your time box ends 14:45 CEST**: push whatever passes tests by then. Work **only** in the files your work package owns, plus its tests. Commit on your branch `wp<N>-<slug>` inside your own git worktree (see `docs/AGENT_RULES.md`); do **not** push or merge — the integrator merges local branches.
@@ -49,7 +64,7 @@ The Docker `ENTRYPOINT` is `python -m rulejudge`. It supports two commands:
 **`adapt`:**
 1. Fit topic-majority priors and immediately commit a **prior-only bundle**.
 2. Split train into F (80%) and S (20%).
-3. **Induce ≤ 16 rules** from F with a Gemma "proposer", using bad/good contrast pairs.
+3. **Induce ≤ 12 rules** from F with a Gemma "proposer", using bad/good contrast pairs.
 4. **Assess every training item with ONE Gemma call** (assessor, temperature 0). For each rule shown, the call returns `"na"` or a violation-support level 0–3.
 5. **Layer A** (pure Python): an item is `bad` iff some **active** rule has support ≥ τ.
    - Compare a fixed head (τ = 2) with a fitted head (τ ∈ {1,2,3} plus disabling ≤ 3 noisy rules) on S.
@@ -142,6 +157,7 @@ Implement the stubs in `io_contract.py`, `priors.py`, `artifacts.py` and `pipeli
 **Other deliverables:**
 
 - `main(argv)`: argparse with the commands `adapt` and `eval`.
+- `RJ_CACHE_DIR`: if set in the environment, use it as `settings.cache_dir` in both stages (the integrator replays a local run in Docker without new API calls); otherwise use the defaults above.
 - **Docker:** keep the skeleton Dockerfile (`python:3.12-slim`, `ENTRYPOINT ["python","-m","rulejudge"]`). Make sure `src/` is copied, because organizer validation helpers may be imported from there.
 - **`scripts/docker_public.sh` / `.ps1`:**
   1. `python src/prepare_inputs.py --train data/public_train.csv --test data/public_test.csv --out-dir runs/<ts>/input`
@@ -197,6 +213,7 @@ text = resp.text; usage = resp.usage_metadata  # prompt_token_count, candidates_
 
 **Plumbing:**
 - **RPM limiter:** sliding 60 s window over `settings.rpm_limit`, thread-safe.
+- **TPM limiter (critical, §0):** sliding 60 s window over estimated input tokens, budget `settings.tpm_limit`. Estimate = ceil(len(system + user) / 2.5) before the call; replace it with `usage_metadata.prompt_token_count` afterwards. A request larger than the budget waits until the window is empty, then goes alone.
 - **Request timeout:** 120 s if the SDK supports `http_options`.
 - **Disk cache:** one JSON file per key in `settings.cache_dir` (when set), written atomically; key = `stable_hash(model, role, system, user, json_expected, max_output_tokens, flags)`.
 - **Usage log:** append JSONL (`role, model, ok, error_kind, input_tokens, output_tokens, latency_s, cached`) under a lock. Never log the key or full prompts.
@@ -260,7 +277,8 @@ Return the JSON object now. The "s" object must contain exactly these ids: R01, 
 
 **Behaviour:**
 - **Empty rule list for a topic → no call**: return `Assessment(status="ok", support={})`. The decision layer treats this as `good`.
-- **Second attempt:** append `Your previous reply was not valid JSON in the required format. Return ONLY the JSON object with ids: ...`. Use `max_output_tokens` = 1024.
+- **Second attempt:** append `Your previous reply was not valid JSON in the required format. Return ONLY the JSON object with ids: ...`. Use `max_output_tokens` = 768.
+- **Compact rules (§0):** omit the `Applies when` / `Violation` / `Not a violation` lines when the field is empty, and add no blank lines between rules. Input tokens are the bottleneck.
 - **`assess_many`:** a `ThreadPoolExecutor(settings.max_concurrency)`.
   - Invoke `on_progress` from the calling thread, every `checkpoint_every` completions and once at the end.
   - Then run one sequential recovery pass over `failed` items only (1 attempt each). Skip it if the last error was `daily_quota`, `deadline` or `auth`.
@@ -283,7 +301,7 @@ Implement the stubs.
 - Pair every bad item with its nearest good item of the same topic by Jaccard similarity.
 
 **Stage 1 — candidates**, proposer role, thinking high:
-- Batch ≤ 4 pairs of one topic per call, keeping rendered text ≤ 12,000 characters per call.
+- Batch ≤ 4 pairs of one topic per call, keeping rendered text ≤ 9,000 characters per call (input-token budget, §0).
 - **Show "PAIR k — BAD" / "— GOOD" headers, never item ids**; map k back to ids locally for provenance.
 
 Stage 1 system prompt:
@@ -295,25 +313,26 @@ Write rules in English, general enough for new conversations: never mention ids,
 Return ONLY JSON: {"candidates": [{"pair": <k>, "text": "...", "applies_when": "...", "violation": "...", "boundary": "...", "topic_specific": true|false, "confidence": "high"|"medium"|"low"}], "no_clear_rule": [<k>, ...]}
 ```
 
-**Stage 2 — consolidation**, one call; split by topic only if it exceeds ~25,000 characters.
+**Stage 2 — consolidation**, one call; split by topic only if it exceeds ~20,000 characters.
 
 - **Input:**
   - all candidates, numbered C1..Cn, with topic, confidence and frequency;
   - up to 4 per topic of **good conversations never used as partners**, each `excerpt`ed to ≤ 1,200 characters, labelled "the expert accepted these — rules must not flag them".
-- **Instruction:** produce at most 16 rules, ordered by importance. Merge duplicates. Scope is `"global"` unless a rule is clearly topic-specific. Fill in `applies_when`, `violation` and `boundary`. Report contradictions and uncovered cases in `notes`.
+- **Instruction:** produce at most 12 rules, ordered by importance. Merge duplicates. Scope is `"global"` unless a rule is clearly topic-specific. Fill in `applies_when`, `violation` and `boundary`. Report contradictions and uncovered cases in `notes`.
 - **Output:** `{"rules": [{"text", "scope", "applies_when", "violation", "boundary", "merged_candidates": ["C3", ...]}], "notes": [...]}`
 
 **Mapping and validation:**
 - Assign `R01..` in output order. Provenance = the bad/good ids of the merged candidates' pairs.
 - **`validate_rulebook`:**
-  - ≤ 16 rules;
+  - ≤ 12 rules (`MAX_RULES`);
   - non-empty, de-duplicated text (token Jaccard > 0.8 = duplicate);
   - scope ∈ `{"global"} ∪ TOPICS`, with anything else → `"global"`;
   - drop or clean rule text containing 32-hex ids or a training `context.user.first_name`;
-  - caps: text ≤ 220 characters, other fields ≤ 260, truncating at a word boundary with `…`;
+  - caps: text ≤ 160 characters, `applies_when` ≤ 120, `violation` ≤ 140, `boundary` ≤ 120, truncating at a word boundary with `…`;
+  - total rendered rubric ≤ 3,500 characters: if over, drop `boundary` fields first, then the lowest-priority rules;
   - return the warnings.
 
-**Fallback and budget:** if consolidation fails twice, dedupe the Stage 1 candidates and keep the top 16 by confidence, then frequency. Respect `settings.max_induction_calls`.
+**Fallback and budget:** if consolidation fails twice, dedupe the Stage 1 candidates and keep the top 12 by confidence, then frequency. Respect `settings.max_induction_calls`.
 
 **Tests (`FakeLLMClient`):**
 - pairs are same-topic and deterministic;
@@ -442,7 +461,7 @@ Escape `<` and `>` in excerpts and collapse newlines. **Never invent examples**:
    - wall time;
    - token usage.
 
-Test labels are used **only** for scoring. `--fake` sets `RJ_FAKE_LLM=1` with a scripted responder, for a dry run. If `.env` exists in the repo root (git-ignored; holds `GEMINI_API_KEY`), load it with a tiny stdlib `KEY=VALUE` parser **without printing values**; never require it in tests.
+Also add `--limit-train N --limit-test M`: deterministic stratified subsets for quick smoke runs, never used for reported numbers. Test labels are used **only** for scoring. `--fake` sets `RJ_FAKE_LLM=1` with a scripted responder, for a dry run. If `.env` exists in the repo root (git-ignored; holds `GEMINI_API_KEY`), load it with a tiny stdlib `KEY=VALUE` parser **without printing values**; never require it in tests.
 
 **`docs/README_SOLUTION_DRAFT.md`** (prose only; the integrator merges it into README):
 - what it is and who it's for;
@@ -469,7 +488,7 @@ Test labels are used **only** for scoring. `--fake` sets `RJ_FAKE_LLM=1` with a 
 | 13:35–14:45 | Agents build. Integrator: real-API smoke (`smoke_gemma.py` once WP2 lands, or an inline check), `docker pull python:3.12-slim`, review branches as they arrive. |
 | **14:45** | Merge in the order WP5 → WP2 → WP3 → WP4 → WP6 → WP1 → WP7, running the full unit suite after each merge. |
 | 15:00 | `scripts/run_public.py --fake` end to end. |
-| **15:05** | **Real public run**: adapt (~150 assessments + ~17 induction calls), eval (80), baseline (80). About 22 min at 15 RPM. |
+| **15:05** | **Real public run**: adapt (~150 assessments + ~17 induction calls), eval (80), baseline (80). About 35 min at ~16K input tokens/min (§0). |
 | 15:30 | Review `explanation.md` and the metrics. **One prompt fix is allowed, using public-train diagnostics only**; public test stays reporting-only, and any change after seeing test results is disclosed. |
 | **15:45** | Cold Docker build + adapt/eval on public data + `src/evaluate.py` on the container output. |
 | 16:00–16:30 | README with real numbers, root LICENSE (Constantin to choose: MIT or Apache-2.0), secret scan, final push, record the SHA, OrganizerHQ submission, fork URL + SHA to the organizers. |
