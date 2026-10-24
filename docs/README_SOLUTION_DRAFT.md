@@ -1,7 +1,5 @@
 # rulejudge — a bank reviewer that learns from expert labels
 
-**Integration draft: merge into the root README after verifying the final run, license and commands.**
-
 rulejudge is a CLI for the Plata *A Judge That Learns from an Expert* challenge. It is for evaluators who need a reproducible whole-conversation `good`/`bad` judge and an inspectable explanation of its learned criteria. It uses the conversation and the account context, rather than treating individual assistant messages in isolation.
 
 ## How it works
@@ -113,15 +111,55 @@ Quota is project-wide; multiple keys do not create independent quota. Supplied e
 
 For a short demo: run the fake plumbing smoke first, then show a **clearly labeled** real completed run if available; open its manifest, runtime rulebook and generated explanation; finish with the real comparison report and limitations. Cached or recorded outputs must be described as cached or recorded, not live inference.
 
-## Results — fill only after a verified full real public run
+## Results — full real public run (24 Oct 2026)
 
-| Method | Macro topic accuracy | Credit | Financial position | Savings | Spending |
-|---|---|---|---|---|---|
-| Learned rulejudge | TBD by integrator | TBD | TBD | TBD | TBD |
-| Same-model zero-shot reviewer | TBD by integrator | TBD | TBD | TBD | TBD |
-| Training topic-majority prior | TBD by integrator | TBD | TBD | TBD | TBD |
+Run: code commit `e52cb62` (the final HEAD changes only docs, LICENSE and Docker pinning); `python scripts/run_public.py`; original-language public data, **150 train / 80 test**; `gemma-4-26b-a4b-it` for all roles (free tier). Scores come from the official `src/evaluate.py`.
 
-Also record the exact SHA, dataset language, model names, fallback/source counts, runtime, token usage, and whether the public test was previously inspected. No performance gain is claimed here. Public test results are reporting-only; changes motivated by those results must be disclosed. The organizer's task score is `10 × macro_topic_accuracy + 0.4 × jury points`; the local runner reports accuracy, not unawarded jury points.
+| Method | Macro topic accuracy | Accuracy | Credit | Financial position | Savings | Spending |
+|---|---:|---:|---:|---:|---:|---:|
+| **rulejudge (R00 + 11 learned rules)** | **0.833** | 0.812 (65/80) | 1.000 | 0.818 | 0.950 | 0.565 |
+| Same-model zero-shot reviewer | 0.826 | 0.812 (65/80) | 0.933 | 0.818 | 0.900 | 0.652 |
+| Training topic-majority prior | 0.626 | 0.625 (50/80) | 0.600 | 0.682 | 0.700 | 0.522 |
+
+Paired outcomes against the same-model baseline:
+
+| Topic | Both right | Only ours | Only baseline | Both wrong |
+|---|---:|---:|---:|---:|
+| credit | 14 | 1 | 0 | 0 |
+| financial_position | 18 | 0 | 0 | 4 |
+| savings | 17 | 2 | 1 | 0 |
+| spending | 11 | 2 | 4 | 6 |
+| **all** | 60 | 5 | 5 | 10 |
+
+**Interpretation:**
+- **Accuracy is a statistical tie with plain Gemma.** Each method is right on 5 conversations the other gets wrong, so this does not demonstrate an accuracy improvement.
+- **Better where specific rules were learned** (credit, savings); **weaker on spending**, where no spending-specific rule was learned and only R00 applies.
+- rulejudge catches more bad conversations (22/30 vs 18/30) at the cost of more false alarms (7/50 vs 3/50). Cohen's κ: 0.597 vs 0.574.
+- What it adds is an inspectable, training-derived rulebook, per-rule evidence, and an automatic jury explanation backed by real training examples.
+
+**Training diagnostics:**
+- 12 rules: R00 plus 11 learned (credit 4, financial_position 4, savings 2, global 1).
+- Selection split F/S = 121/29. Selected head: fixed, τ = 2. Training-S macro 0.804 vs prior 0.627, so the floor was not applied.
+- R00 triggered on 39 bad / 8 good training conversations (precision 0.83).
+
+**Cost and reliability (this run):**
+- Wall time: adapt 38.5 min, eval 8.1 min, baseline 7.2 min.
+- Calls: 22 proposer (2 server-side timeouts, skipped), 152 + 81 assessor (0 failed), 80 baseline.
+- About 406K input / 29K output tokens in total.
+- 0 prior fallbacks for both methods.
+
+**Docker verification:**
+- Image pinned by base digest and `constraints.txt`; `pip-audit` found no known vulnerabilities.
+- Replaying this run inside separate containers with `RJ_CACHE_DIR` produced an **identical rulebook and head** (adapt) and **identical predictions** (eval; official score 0.8333).
+
+**Disclosure — the public test was not untouched:**
+- A 16-item public-test smoke subset was scored before the final design. With learned rules only, it gave 0.483 vs the baseline's 0.838.
+- That result led to two changes before the full run:
+  - adding the fixed general check **R00**;
+  - switching from `gemma-4-31b-it` (34–315 s per call on the free tier) to `gemma-4-26b-a4b-it`.
+- Nothing was changed after the full run above. These public-test numbers therefore informed one design change and are not an untouched held-out estimate.
+
+The organizer's task score is `10 × macro_topic_accuracy + 0.4 × jury points`; the local runner reports accuracy only.
 
 ## Limitations and failure behavior
 
@@ -132,7 +170,8 @@ Also record the exact SHA, dataset language, model names, fallback/source counts
 - Rate limits, daily quota exhaustion, authentication problems and malformed replies can force majority fallback. A complete CSV can still be mostly prior predictions; inspect source counts and degraded-mode banners.
 - The learned rubric does not compensate across criteria. A single active trigger can classify an otherwise good conversation as `bad`.
 - Training/selection metrics are not held-out test performance; final refitting reuses selection data. Small public test differences are not evidence of a statistically reliable improvement.
-- API processing permission, available quota, organizer runtime/network access and the final code license must be checked independently before submission.
+- **Stage time budget.** `RJ_TIME_BUDGET_S` defaults to 3000 s per stage. On the free tier, adapt on 150 items took 38.5 min, and about 190 private training items may approach the budget. When it is reached, the remaining calls return `deadline`. Those training items count as failed assessments, and adapt still commits the learned bundle. Eval (about 6 min per 80 items here) keeps a complete, checkpointed CSV. Raise the budget if organizer limits allow.
+- Gemini API processing permission and quota at the organizer run were assumed available as instructed; free-tier latency varies (two induction calls timed out server-side in the reported run).
 
 ## AI-assistance disclosure
 
