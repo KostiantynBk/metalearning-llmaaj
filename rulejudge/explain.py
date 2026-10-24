@@ -10,7 +10,7 @@ def select_examples(items, assessments, head, rulebook, per_rule: int = 2) -> di
 
 
 def render_explanation(report: dict) -> str:
-    """Markdown explanation; `report` keys are defined in IMPLEMENTATION_PLAN.md (WP6)."""
+    """Markdown explanation; `report` keys are defined in docs/IMPLEMENTATION_PLAN.md (WP6)."""
     raise NotImplementedError
 
 

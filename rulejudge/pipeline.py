@@ -1,4 +1,4 @@
-"""WP1 — orchestration of `adapt` and `eval` (see IMPLEMENTATION_PLAN.md, WP1)."""
+"""WP1 — orchestration of `adapt` and `eval` (see docs/IMPLEMENTATION_PLAN.md, WP1)."""
 from __future__ import annotations
 
 from typing import Optional
