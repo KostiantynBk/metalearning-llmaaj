@@ -161,6 +161,24 @@ Paired outcomes against the same-model baseline:
 
 The organizer's task score is `10 × macro_topic_accuracy + 0.4 × jury points`; the local runner reports accuracy only.
 
+## Research basis
+
+The design draws on seven sources. Each row names the part of this code it shaped. All results cited there are the **authors' results on their own tasks**; none reports results on Plata data, and nothing below is a claim that their gains transfer.
+
+| Source | What we took from it | Where it lives here |
+|---|---|---|
+| Kola et al., **SAJA: A Simple Approach to Judge Alignment for LLM-as-a-Judge** (ACL 2026 Industry, `2026.acl-industry.45`) | One structured LLM call per item extracts features; a small, separate decision layer is fitted on labels. Fixed and fitted heads are compared rather than assuming calibration helps: their full head lowered binary accuracy (0.65 → 0.61). | `assessor.py` (one call per conversation); `decision.py` (fixed vs fitted head, selection on training data) |
+| Kwako et al., **LLM-Based Rubric Refinement in Multi-Agent Automated Scoring** (AIME-Con 2026, `2026.aimecon-sessions.2`) | Rubric text derived from labelled examples, with evidence-linked proposals and an explicit "no clear rule" option. The result is checked on a separate full split, not only on the cases that motivated it. | `induction.py` (`no_clear_rule`, provenance kept for audit); head selection and the prior floor on the held-out training split S |
+| Lu et al., **SPEAR: Code-Augmented Agentic Prompt Optimization** (arXiv `2605.26275`) | Keep analysis and selection separate, select with the official metric, budget all calls, and expect small dev sets to rank noisily. Plus a recovery pass for failed calls. | Topic-macro selection metric; `RJ_MAX_INDUCTION_CALLS`; incumbent wins ties; assessor recovery pass |
+| Sun et al., **Support Vector Rubrics: Closing the Gap Between Self-Generated and Human Rubrics** (arXiv `2606.08077`) | Contrastive good-vs-bad induction, and evidence that per-criterion treatment matters (their uniform-weight ablation fell from 82.8 to 64.3). We did not copy compensating weights into an any-violation task. | Same-topic bad/good contrast pairs; precision-gated rule disabling; non-compensating veto |
+| Kawakami et al., **"I want to be pushed, I want to grow": Enabling social workers to design evaluations of LLM augmentation in their work** (arXiv `2608.22459`) | Criteria need explicit applicability, boundaries ("what is *not* a violation") and contrasting examples; "not applicable" is a normal outcome. | `Rule.applies_when` / `boundary`; explanation sections on boundaries and false alarms; "no applicable rule ⇒ good" |
+| Robsky, Lavitas and Wang, **Reliable Evaluations for LLMs and AI Agents** (book) | Hard gates on critical dimensions, separate data roles, paired-difference uncertainty when comparing systems, and failure handling where one failed call never invalidates a run. | Veto decision layer; train-only `adapt` / test-only `eval`; paired comparison table above; priors-first bundles and checkpointed CSV |
+| Mehrabi et al., **Prompting Strategy Effects Depend on the Judge: A Multilingual Study of LLM-as-a-Judge Robustness** (arXiv `2610.31172`) | Prompt effects depend on the judge model and language, so tune and test on the deployed model rather than transferring a "best" prompt. Their Gemma evidence is Gemma 3, not Gemma 4. | All measurements on `gemma-4-26b-a4b-it` itself; same-model zero-shot baseline |
+
+Two choices came from our own measurements rather than the literature:
+- the fixed general check **R00**, added after a public-test smoke subset showed a learned-rules-only judge missing most bad answers (see the disclosure above);
+- the switch to 26B-A4B, driven by measured free-tier latency.
+
 ## Limitations and failure behavior
 
 - A small labeled training set cannot identify every hidden rule. Inferred requirements can be wrong, incomplete, overly broad, or inconsistent.
