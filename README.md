@@ -139,8 +139,8 @@ Paired outcomes against the same-model baseline:
 | **all** | 60 | 5 | 5 | 10 |
 
 **Interpretation:**
-- **Accuracy is a statistical tie with plain Gemma.** Each method is right on 5 conversations the other gets wrong, so this does not demonstrate an accuracy improvement.
-- **Better where specific rules were learned** (credit, savings); **weaker on spending**, where no spending-specific rule was learned and only R00 applies.
+- **No accuracy improvement over plain Gemma was demonstrated.** Each method is right on 5 conversations the other gets wrong. This is not a formal demonstration of statistical equivalence.
+- **Higher observed accuracy on credit and savings; lower on spending**, where no spending-specific rule was learned and only R00 applies. This suggests a coverage gap, but does not isolate the cause of the performance differences.
 - rulejudge catches more bad conversations (22/30 vs 18/30) at the cost of more false alarms (7/50 vs 3/50). Cohen's κ: 0.597 vs 0.574.
 - What it adds is an inspectable, training-derived rulebook, per-rule evidence, and an automatic jury explanation backed by real training examples.
 
@@ -188,8 +188,9 @@ Two choices came from our own measurements rather than the literature:
 
 ## Limitations and failure behavior
 
-- A small labeled training set cannot identify every hidden rule. Inferred requirements can be wrong, incomplete, overly broad, or inconsistent.
-- Textual rationales are not proof of faithful model reasoning. Evidence pointers and gold labels support auditing, not guarantees.
+- **Single-pass assessment.** One substantive Gemma request assesses all applicable rules for each conversation. Content retries and failed-call recovery repair format or transport failures, not plausible but incorrect judgments. Independent semantic verification, per-rule calls and multi-pass consensus have not been evaluated; more calls are not assumed to improve accuracy.
+- **Incomplete coverage and bounded induction.** A small labeled training set cannot identify every hidden rule. Inferred requirements can be wrong, incomplete, overly broad, or inconsistent. The public run learned no spending-specific rule. Lexical contrast pairing and the compact rule budget can miss requirements; the current pipeline does not revise the rubric in response to residual training errors.
+- **Inspectable evidence is not independent fact-checking.** Textual rationales are not proof of faithful model reasoning. The parser checks whether evidence pointers resolve to existing messages or context fields, not whether they substantiate a violation. Vetoes depend on model-produced support levels and do not require independently verified evidence.
 - Context/conversation text is untrusted input. Delimiter neutralization and reviewer instructions reduce prompt-injection risk but cannot eliminate it; the zero-shot comparison uses the prescribed simpler baseline prompt.
 - Multi-language meaning, numerical reasoning and context interpretation may fail. The rule cap and prompt budget can omit important details.
 - Rate limits, daily quota exhaustion, authentication problems and malformed replies can force majority fallback. A complete CSV can still be mostly prior predictions; inspect source counts and degraded-mode banners.
@@ -197,6 +198,15 @@ Two choices came from our own measurements rather than the literature:
 - Training/selection metrics are not held-out test performance; final refitting reuses selection data. Small public test differences are not evidence of a statistically reliable improvement.
 - **Stage time budget.** `RJ_TIME_BUDGET_S` defaults to 3000 s per stage. On the free tier, adapt on 150 items took 38.5 min, and about 190 private training items may approach the budget. When it is reached, the remaining calls return `deadline`. Those training items count as failed assessments, and adapt still commits the learned bundle. Eval (about 6 min per 80 items here) keeps a complete, checkpointed CSV. Raise the budget if organizer limits allow.
 - Gemini API processing permission and quota at the organizer run were assumed available as instructed; free-tier latency varies (two induction calls timed out server-side in the reported run).
+
+## Next experiments — not implemented or validated
+
+1. **Verify proposed violations.** Compare the single-pass assessor with a separately prompted evidence-verification pass and a higher-thinking assessor. Test multi-assessment aggregation rather than assuming consensus helps; the task's any-violation rule is not a reason to reject whenever any reviewer says `bad`.
+2. **Improve coverage using training only.** Diagnose uncovered topics and residual errors, then test one bounded rubric-refinement round and semantic contrast pairing on separate validation data.
+3. **Isolate what helps.** Compare zero-shot, R00-only, learned-only and R00-plus-learned variants under matched conditions. The current comparison does not isolate the incremental benefit of learned rules from R00 or prompt structure.
+4. **Strengthen evaluation.** Freeze variants before untouched evaluation; report paired topic-macro uncertainty, bad-case recall, false alarms, fallback rate, tokens and latency. Repeat fresh inference/adaptation runs to measure variability. Exact-request cache replay is a reproducibility check for saved responses, not an independent model trial.
+
+These are research directions, not claimed improvements. The public-test influence disclosed above remains a limitation of the reported results.
 
 ## AI-assistance disclosure
 
